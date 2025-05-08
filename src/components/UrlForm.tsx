@@ -52,12 +52,17 @@ const UrlForm: React.FC<UrlFormProps> = ({ onSubmit, isLoading }) => {
             placeholder="example.com/article"
             className="flex-grow"
             disabled={isLoading}
+            aria-describedby="url-description"
           />
-          <Button type="submit" disabled={isLoading} className="whitespace-nowrap">
+          <Button 
+            type="submit" 
+            disabled={isLoading} 
+            className="whitespace-nowrap"
+          >
             {isLoading ? "Checking..." : "Check Links"}
           </Button>
         </div>
-        <p className="mt-2 text-sm text-gray-500">
+        <p id="url-description" className="mt-2 text-sm text-gray-500">
           We'll check all links on this single page (no crawling).
         </p>
       </div>

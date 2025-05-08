@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowDown, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { Alert, AlertTitle, AlertDescription } from "@/components/ui/alert";
 
 const Index = () => {
   const [results, setResults] = useState<LinkCheckResult[]>([]);
@@ -37,6 +38,7 @@ const Index = () => {
       console.error("Error checking links:", error);
       setError(error instanceof Error ? error.message : 'Something went wrong while checking links.');
       setHasChecked(true);
+      toast.error(`Error checking links: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsChecking(false);
     }
@@ -86,15 +88,11 @@ const Index = () => {
         </Card>
 
         {error && hasChecked && (
-          <Card className="p-4 mb-6 bg-red-50 border-red-200 text-red-700 max-w-3xl mx-auto">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="h-5 w-5" />
-              <div>
-                <p className="font-medium">Error checking links</p>
-                <p className="text-sm">{error}</p>
-              </div>
-            </div>
-          </Card>
+          <Alert variant="destructive" className="mb-6 max-w-3xl mx-auto">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error checking links</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
         )}
 
         {hasChecked && !error && (

@@ -7,23 +7,58 @@ export const checkLinks = async (url: string): Promise<LinkCheckResult[]> => {
     // Show initial loading toast
     toast.info("Fetching page content...", { id: "fetch-status" });
     
-    // Use a public CORS proxy
-    const corsProxy = "https://corsproxy.io/?";
-    const targetUrl = encodeURIComponent(url);
-    const proxyUrl = `${corsProxy}${targetUrl}`;
+    // Try multiple CORS proxies in case one fails
+    const corsProxies = [
+      "https://api.allorigins.win/raw?url=",
+      "https://corsproxy.io/?",
+      "https://cors-anywhere.herokuapp.com/"
+    ];
     
-    // Fetch the page content
-    const pageResponse = await fetch(proxyUrl, {
-      headers: {
-        'Accept': 'text/html,application/xhtml+xml,application/xml'
+    let html = null;
+    let proxyUsed = "";
+    let error = null;
+    
+    // Try each proxy until one works
+    for (const proxy of corsProxies) {
+      try {
+        const targetUrl = encodeURIComponent(url);
+        const proxyUrl = `${proxy}${targetUrl}`;
+        
+        console.log(`Trying proxy: ${proxy}`);
+        
+        // Fetch the page content with a timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const pageResponse = await fetch(proxyUrl, {
+          headers: {
+            'Accept': 'text/html,application/xhtml+xml,application/xml',
+            'User-Agent': 'Mozilla/5.0 (compatible; LinkScribe/1.0)'
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!pageResponse.ok) {
+          throw new Error(`Failed to fetch the page: ${pageResponse.status} ${pageResponse.statusText}`);
+        }
+        
+        html = await pageResponse.text();
+        proxyUsed = proxy;
+        break; // Exit the loop if we successfully got the content
+      } catch (err) {
+        error = err;
+        console.log(`Proxy ${proxy} failed:`, err);
+        // Continue to next proxy
       }
-    });
-    
-    if (!pageResponse.ok) {
-      throw new Error(`Failed to fetch the page: ${pageResponse.status} ${pageResponse.statusText}`);
     }
     
-    const html = await pageResponse.text();
+    if (!html) {
+      // If all proxies failed, throw the last error
+      throw error || new Error("All proxies failed to fetch the content");
+    }
+    
     toast.info("Extracting links...", { id: "fetch-status" });
     
     // Extract links using regex
@@ -34,14 +69,16 @@ export const checkLinks = async (url: string): Promise<LinkCheckResult[]> => {
     
     // Limit to 25 links for demo purposes
     const limitedLinks = uniqueLinks.slice(0, 25);
-    toast.success(`Found ${limitedLinks.length} links to check`, { id: "fetch-status" });
     
     if (limitedLinks.length === 0) {
+      toast.info("No links found on the page", { id: "fetch-status" });
       return [];
     }
     
+    toast.success(`Found ${limitedLinks.length} links to check`, { id: "fetch-status" });
+    
     // Check links (with throttling to avoid too many concurrent requests)
-    const results = await checkLinksInBatches(limitedLinks, 3);
+    const results = await checkLinksInBatches(limitedLinks, 3, proxyUsed);
     
     return results;
   } catch (error) {
@@ -54,28 +91,53 @@ export const checkLinks = async (url: string): Promise<LinkCheckResult[]> => {
 // Extract links from HTML using regex
 function extractLinks(html: string, baseUrl: string): string[] {
   const links: string[] = [];
-  // More robust regex pattern for href attributes
-  const hrefRegex = /href=["']((?:(?:https?|ftp):\/\/|\/)[^"'\s>]+)["']/gi;
-  let match;
-
-  while ((match = hrefRegex.exec(html)) !== null) {
-    try {
-      const href = match[1];
-      
-      // Skip anchor links and javascript URLs
-      if (href && !href.startsWith("javascript:")) {
-        // Resolve relative URLs
-        try {
-          // Handle both absolute and relative URLs
-          const resolvedUrl = new URL(href, baseUrl).toString();
-          links.push(resolvedUrl);
-        } catch (e) {
-          // Skip invalid URLs
-          console.warn("Skipping invalid URL:", href);
+  
+  try {
+    // Create a DOM parser to handle HTML correctly
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    
+    // Get all anchor elements
+    const anchorElements = doc.querySelectorAll('a');
+    
+    anchorElements.forEach(anchor => {
+      try {
+        const href = anchor.getAttribute('href');
+        
+        if (href && !href.startsWith('javascript:') && !href.startsWith('#')) {
+          try {
+            // Handle both absolute and relative URLs
+            const resolvedUrl = new URL(href, baseUrl).toString();
+            links.push(resolvedUrl);
+          } catch (e) {
+            console.warn("Skipping invalid URL:", href);
+          }
         }
+      } catch (e) {
+        console.error("Error processing link:", e);
       }
-    } catch (e) {
-      console.error("Error processing link:", e);
+    });
+  } catch (e) {
+    // Fallback to regex if DOM parsing fails
+    console.log("DOM parsing failed, falling back to regex");
+    const hrefRegex = /href=["']((?:(?:https?|ftp):\/\/|\/)[^"'\s>]+)["']/gi;
+    let match;
+    
+    while ((match = hrefRegex.exec(html)) !== null) {
+      try {
+        const href = match[1];
+        
+        if (href && !href.startsWith("javascript:") && !href.startsWith('#')) {
+          try {
+            const resolvedUrl = new URL(href, baseUrl).toString();
+            links.push(resolvedUrl);
+          } catch (e) {
+            console.warn("Skipping invalid URL:", href);
+          }
+        }
+      } catch (e) {
+        console.error("Error processing link:", e);
+      }
     }
   }
 
@@ -83,7 +145,7 @@ function extractLinks(html: string, baseUrl: string): string[] {
 }
 
 // Process links in batches to avoid too many concurrent requests
-async function checkLinksInBatches(links: string[], batchSize: number): Promise<LinkCheckResult[]> {
+async function checkLinksInBatches(links: string[], batchSize: number, proxyUsed: string): Promise<LinkCheckResult[]> {
   const results: LinkCheckResult[] = [];
   const totalLinks = links.length;
   
@@ -91,7 +153,7 @@ async function checkLinksInBatches(links: string[], batchSize: number): Promise<
   
   for (let i = 0; i < links.length; i += batchSize) {
     const batch = links.slice(i, i + batchSize);
-    const batchPromises = batch.map(checkSingleLink);
+    const batchPromises = batch.map(link => checkSingleLink(link, proxyUsed));
     const batchResults = await Promise.all(batchPromises);
     results.push(...batchResults);
     
@@ -112,25 +174,28 @@ async function checkLinksInBatches(links: string[], batchSize: number): Promise<
   return results;
 }
 
-async function checkSingleLink(url: string): Promise<LinkCheckResult> {
+async function checkSingleLink(url: string, proxyUsed: string): Promise<LinkCheckResult> {
   try {
     // Add cache-busting parameter to avoid cached responses
     const urlWithCacheBuster = new URL(url);
     urlWithCacheBuster.searchParams.append('_cb', Date.now().toString());
     
-    // For external URLs, use the same CORS proxy
-    const corsProxy = "https://corsproxy.io/?";
+    // For external URLs, use the same CORS proxy that worked for the initial page
     const targetUrl = encodeURIComponent(urlWithCacheBuster.toString());
-    const proxyUrl = `${corsProxy}${targetUrl}`;
+    const proxyUrl = `${proxyUsed}${targetUrl}`;
     
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 8000); // 8 second timeout
     
     try {
+      // Try a HEAD request first (faster)
       const response = await fetch(proxyUrl, {
-        method: "HEAD", // Try HEAD first
+        method: "HEAD",
         redirect: "follow",
         signal: controller.signal,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; LinkScribe/1.0)'
+        }
       });
       
       clearTimeout(timeoutId);
@@ -142,6 +207,8 @@ async function checkSingleLink(url: string): Promise<LinkCheckResult> {
         error: response.ok ? undefined : `${response.status} ${response.statusText}`,
       };
     } catch (headError) {
+      console.log(`HEAD request failed for ${url}, trying GET`);
+      
       // If HEAD fails, try GET instead (some servers don't support HEAD)
       const getController = new AbortController();
       const getTimeoutId = setTimeout(() => getController.abort(), 8000);
@@ -151,6 +218,9 @@ async function checkSingleLink(url: string): Promise<LinkCheckResult> {
           method: "GET",
           redirect: "follow",
           signal: getController.signal,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (compatible; LinkScribe/1.0)'
+          }
         });
         
         clearTimeout(getTimeoutId);
