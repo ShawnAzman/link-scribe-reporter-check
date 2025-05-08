@@ -4,37 +4,141 @@ import { toast } from "sonner";
 
 export const checkLinks = async (url: string): Promise<LinkCheckResult[]> => {
   try {
-    // Add timestamp to prevent caching issues
-    const timestamp = new Date().getTime();
-    const apiUrl = `/api/check-links?url=${encodeURIComponent(url)}&_t=${timestamp}`;
+    // Perform a CORS request to the target URL using a cors-anywhere style proxy
+    // For demo purposes, we'll use a public CORS proxy (in production, you'd use your own)
+    const corsProxy = "https://corsproxy.io/?";
+    const targetUrl = encodeURIComponent(url);
+    const proxyUrl = `${corsProxy}${targetUrl}`;
     
-    const response = await fetch(apiUrl);
+    toast.info("Fetching page content...");
     
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Error response:", errorText);
-      throw new Error(`Error: ${response.status}`);
+    // Fetch the page content
+    const pageResponse = await fetch(proxyUrl);
+    
+    if (!pageResponse.ok) {
+      throw new Error(`Failed to fetch the page: ${pageResponse.status} ${pageResponse.statusText}`);
     }
     
-    const contentType = response.headers.get('content-type');
-    if (!contentType || !contentType.includes('application/json')) {
-      console.error('Non-JSON response received:', contentType);
-      const text = await response.text();
-      console.error('Response body:', text.substring(0, 500) + '...');
-      throw new Error('Server returned non-JSON response');
-    }
+    const html = await pageResponse.text();
+    toast.info("Extracting links...");
     
-    const data = await response.json();
+    // Extract links using regex
+    const links = extractLinks(html, url);
     
-    if (!data || !Array.isArray(data.results)) {
-      console.error('Invalid response structure:', data);
-      throw new Error('Invalid server response structure');
-    }
+    // Deduplicate links
+    const uniqueLinks = [...new Set(links)];
     
-    return data.results || [];
+    // Limit to 25 links for demo purposes
+    const limitedLinks = uniqueLinks.slice(0, 25);
+    toast.info(`Checking ${limitedLinks.length} links...`);
+    
+    // Check links (with throttling to avoid too many concurrent requests)
+    const results = await checkLinksInBatches(limitedLinks, 3);
+    
+    return results;
   } catch (error) {
     console.error("Error checking links:", error);
     toast.error(`Failed to check links: ${error instanceof Error ? error.message : 'Unknown error'}`);
     throw error;
   }
 };
+
+// Extract links from HTML using regex
+function extractLinks(html: string, baseUrl: string): string[] {
+  const links: string[] = [];
+  const hrefRegex = /href=["'](.*?)["']/gi;
+  let match;
+
+  while ((match = hrefRegex.exec(html)) !== null) {
+    try {
+      const href = match[1];
+      
+      // Skip anchor links and javascript URLs
+      if (href && !href.startsWith("#") && !href.startsWith("javascript:")) {
+        // Resolve relative URLs
+        try {
+          const resolvedUrl = new URL(href, baseUrl).toString();
+          links.push(resolvedUrl);
+        } catch (e) {
+          // Skip invalid URLs
+          console.error("Error resolving URL:", href, e);
+        }
+      }
+    } catch (e) {
+      console.error("Error processing link:", e);
+    }
+  }
+
+  return links;
+}
+
+// Process links in batches to avoid too many concurrent requests
+async function checkLinksInBatches(links: string[], batchSize: number): Promise<LinkCheckResult[]> {
+  const results: LinkCheckResult[] = [];
+  
+  for (let i = 0; i < links.length; i += batchSize) {
+    const batch = links.slice(i, i + batchSize);
+    const batchPromises = batch.map(checkSingleLink);
+    const batchResults = await Promise.all(batchPromises);
+    results.push(...batchResults);
+    
+    // Update toast with progress
+    const progress = Math.min(100, Math.round(((i + batchSize) / links.length) * 100));
+    if (progress < 100) {
+      toast.info(`Checking links: ${progress}% complete...`, { id: "progress" });
+    }
+  }
+  
+  toast.dismiss("progress");
+  return results;
+}
+
+async function checkSingleLink(url: string): Promise<LinkCheckResult> {
+  try {
+    // For external URLs, use the same CORS proxy
+    const corsProxy = "https://corsproxy.io/?";
+    const targetUrl = encodeURIComponent(url);
+    const proxyUrl = `${corsProxy}${targetUrl}`;
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
+    const response = await fetch(proxyUrl, {
+      method: "HEAD", // Try HEAD first
+      redirect: "follow",
+      signal: controller.signal,
+    }).catch(async () => {
+      // If HEAD fails, try GET instead (some servers don't support HEAD)
+      return fetch(proxyUrl, {
+        method: "GET",
+        redirect: "follow",
+        signal: controller.signal,
+      });
+    });
+    
+    clearTimeout(timeoutId);
+    
+    return {
+      url,
+      isWorking: response.ok,
+      statusCode: response.status,
+      error: response.ok ? undefined : `${response.status} ${response.statusText}`,
+    };
+  } catch (error) {
+    let errorMessage = "Connection failed";
+    
+    if (error instanceof Error) {
+      if (error.name === "AbortError") {
+        errorMessage = "Request timeout";
+      } else {
+        errorMessage = error.message;
+      }
+    }
+    
+    return {
+      url,
+      isWorking: false,
+      error: errorMessage,
+    };
+  }
+}

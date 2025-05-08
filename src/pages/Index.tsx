@@ -23,7 +23,9 @@ const Index = () => {
       setIsChecking(true);
       setHasChecked(false);
       setUrl(submittedUrl);
+      setResults([]);
       
+      // Start the link checking process
       const data = await checkLinks(submittedUrl);
       setResults(data);
       setHasChecked(true);
@@ -39,7 +41,7 @@ const Index = () => {
       }
     } catch (error) {
       console.error("Error checking links:", error);
-      toast.error("Something went wrong while checking links.");
+      // The error toasts are already handled in the checkLinks function
     } finally {
       setIsChecking(false);
     }
