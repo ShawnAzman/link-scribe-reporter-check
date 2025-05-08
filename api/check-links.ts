@@ -40,7 +40,7 @@ export default async function handler(req: Request) {
     const html = await pageResponse.text();
     
     // Parse HTML and extract links
-    const links: string[] = extractLinks(html, url);
+    const links = extractLinks(html, url);
     
     // Deduplicate links
     const uniqueLinks = [...new Set(links)];
