@@ -54,14 +54,20 @@ export default async function handler(req: NextRequest) {
     // Check each link (limiting concurrency to 5)
     const results = await checkLinksInBatches(uniqueLinks, 5);
     
-    return NextResponse.json({ results });
+    // Make sure we're returning proper JSON
+    return new NextResponse(JSON.stringify({ results }), {
+      headers: { "content-type": "application/json" },
+      status: 200,
+    });
     
   } catch (error) {
     console.error("Error checking links:", error);
-    return NextResponse.json(
-      { error: `Failed to check links: ${error instanceof Error ? error.message : String(error)}` }, 
-      { status: 500 }
-    );
+    return new NextResponse(JSON.stringify(
+      { error: `Failed to check links: ${error instanceof Error ? error.message : String(error)}` }
+    ), {
+      headers: { "content-type": "application/json" },
+      status: 500,
+    });
   }
 }
 
