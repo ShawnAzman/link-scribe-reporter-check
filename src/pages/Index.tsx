@@ -1,5 +1,5 @@
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import UrlForm from "@/components/UrlForm";
 import ResultsTable from "@/components/ResultsTable";
 import StatusBanner from "@/components/StatusBanner";
@@ -17,30 +17,62 @@ const Index = () => {
   const [hasChecked, setHasChecked] = useState(false);
   const [url, setUrl] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [isRecursive, setIsRecursive] = useState(false);
+  const [maxDepth, setMaxDepth] = useState(3);
+  const [checkedPages, setCheckedPages] = useState(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
-  const handleSubmit = async (submittedUrl: string) => {
+  const handleSubmit = async (submittedUrl: string, recursive: boolean, depth: number) => {
     if (!submittedUrl) return;
 
     try {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+      
+      // Create a new abort controller
+      abortControllerRef.current = new AbortController();
+      
       setIsChecking(true);
       setHasChecked(false);
       setError(null);
       setUrl(submittedUrl);
       setResults([]);
+      setIsRecursive(recursive);
+      setMaxDepth(depth);
+      setCheckedPages(0);
       
       // Start the link checking process
-      const data = await checkLinks(submittedUrl);
+      const data = await checkLinks(
+        submittedUrl, 
+        recursive, 
+        depth, 
+        (newResults) => {
+          setResults(prevResults => [...prevResults, ...newResults]);
+        },
+        (pageCount) => {
+          setCheckedPages(pageCount);
+        },
+        abortControllerRef.current.signal
+      );
+      
       setResults(data);
       setHasChecked(true);
       
       // Success toasts are handled inside checkLinks function
     } catch (error) {
       console.error("Error checking links:", error);
-      setError(error instanceof Error ? error.message : 'Something went wrong while checking links.');
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setError("Link checking was cancelled.");
+        toast.info("Link checking was cancelled.");
+      } else {
+        setError(error instanceof Error ? error.message : 'Something went wrong while checking links.');
+        toast.error(`Error checking links: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
       setHasChecked(true);
-      toast.error(`Error checking links: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsChecking(false);
+      abortControllerRef.current = null;
     }
   };
 
@@ -85,6 +117,14 @@ const Index = () => {
 
         <Card className="p-6 mb-6 max-w-3xl mx-auto">
           <UrlForm onSubmit={handleSubmit} isLoading={isChecking} />
+          
+          {isChecking && (
+            <div className="mt-4 flex justify-center">
+              <Button variant="outline" onClick={() => abortControllerRef.current?.abort()} className="text-red-600">
+                Cancel Check
+              </Button>
+            </div>
+          )}
         </Card>
 
         {error && hasChecked && (
@@ -97,7 +137,7 @@ const Index = () => {
 
         {hasChecked && !error && (
           <>
-            <StatusBanner results={results} url={url} />
+            <StatusBanner results={results} url={url} checkedPages={checkedPages} isRecursive={isRecursive} />
 
             {results.length > 0 && (
               <div className="my-6 max-w-5xl mx-auto">
@@ -113,7 +153,7 @@ const Index = () => {
                   </Button>
                 </div>
                 
-                <ResultsTable results={results} />
+                <ResultsTable results={results} isRecursive={isRecursive} />
               </div>
             )}
           </>
