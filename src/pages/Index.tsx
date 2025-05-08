@@ -7,7 +7,7 @@ import { LinkCheckResult } from "@/types/linkTypes";
 import { checkLinks } from "@/services/linkChecker";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
 const Index = () => {
@@ -15,6 +15,7 @@ const Index = () => {
   const [isChecking, setIsChecking] = useState(false);
   const [hasChecked, setHasChecked] = useState(false);
   const [url, setUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (submittedUrl: string) => {
     if (!submittedUrl) return;
@@ -22,6 +23,7 @@ const Index = () => {
     try {
       setIsChecking(true);
       setHasChecked(false);
+      setError(null);
       setUrl(submittedUrl);
       setResults([]);
       
@@ -30,18 +32,11 @@ const Index = () => {
       setResults(data);
       setHasChecked(true);
       
-      // Show toast based on results
-      const brokenCount = data.filter(item => !item.isWorking).length;
-      if (brokenCount > 0) {
-        toast.warning(`Found ${brokenCount} broken link${brokenCount > 1 ? 's' : ''}.`);
-      } else if (data.length > 0) {
-        toast.success("All links are working properly!");
-      } else {
-        toast.info("No links were found on this page.");
-      }
+      // Success toasts are handled inside checkLinks function
     } catch (error) {
       console.error("Error checking links:", error);
-      // The error toasts are already handled in the checkLinks function
+      setError(error instanceof Error ? error.message : 'Something went wrong while checking links.');
+      setHasChecked(true);
     } finally {
       setIsChecking(false);
     }
@@ -90,7 +85,19 @@ const Index = () => {
           <UrlForm onSubmit={handleSubmit} isLoading={isChecking} />
         </Card>
 
-        {hasChecked && (
+        {error && hasChecked && (
+          <Card className="p-4 mb-6 bg-red-50 border-red-200 text-red-700 max-w-3xl mx-auto">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="h-5 w-5" />
+              <div>
+                <p className="font-medium">Error checking links</p>
+                <p className="text-sm">{error}</p>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {hasChecked && !error && (
           <>
             <StatusBanner results={results} url={url} />
 
