@@ -1,17 +1,21 @@
 
-import { NextRequest, NextResponse } from "next/server";
-import * as cheerio from "cheerio";
-
+// Use native fetch API for serverless edge function
 export const config = {
   runtime: "edge",
 };
 
-export default async function handler(req: NextRequest) {
+export default async function handler(req: Request) {
   try {
     const url = new URL(req.url).searchParams.get("url");
     
     if (!url) {
-      return NextResponse.json({ error: "URL parameter is required" }, { status: 400 });
+      return new Response(
+        JSON.stringify({ error: "URL parameter is required" }),
+        { 
+          status: 400,
+          headers: { "content-type": "application/json" }
+        }
+      );
     }
 
     // Fetch the target page
@@ -22,53 +26,70 @@ export default async function handler(req: NextRequest) {
     });
 
     if (!pageResponse.ok) {
-      return NextResponse.json(
-        { error: `Failed to fetch the URL: ${pageResponse.status} ${pageResponse.statusText}` }, 
-        { status: 400 }
+      return new Response(
+        JSON.stringify({ 
+          error: `Failed to fetch the URL: ${pageResponse.status} ${pageResponse.statusText}` 
+        }),
+        { 
+          status: 400,
+          headers: { "content-type": "application/json" }
+        }
       );
     }
 
     const html = await pageResponse.text();
     
     // Parse HTML and extract links
-    const $ = cheerio.load(html);
-    const links: string[] = [];
+    const links: string[] = extractLinks(html, url);
     
-    $("a[href]").each((_, element) => {
-      const href = $(element).attr("href");
-      
-      if (href && !href.startsWith("#") && !href.startsWith("javascript:")) {
-        try {
-          // Resolve relative URLs
-          const resolvedUrl = new URL(href, url).toString();
-          links.push(resolvedUrl);
-        } catch (e) {
-          console.error(`Error resolving URL ${href}:`, e);
-        }
-      }
-    });
-
     // Deduplicate links
     const uniqueLinks = [...new Set(links)];
     
     // Check each link (limiting concurrency to 5)
     const results = await checkLinksInBatches(uniqueLinks, 5);
     
-    // Make sure we're returning proper JSON
-    return new NextResponse(JSON.stringify({ results }), {
-      headers: { "content-type": "application/json" },
-      status: 200,
-    });
-    
+    // Return proper JSON
+    return new Response(
+      JSON.stringify({ results }),
+      { 
+        status: 200,
+        headers: { "content-type": "application/json" }
+      }
+    );
   } catch (error) {
     console.error("Error checking links:", error);
-    return new NextResponse(JSON.stringify(
-      { error: `Failed to check links: ${error instanceof Error ? error.message : String(error)}` }
-    ), {
-      headers: { "content-type": "application/json" },
-      status: 500,
-    });
+    return new Response(
+      JSON.stringify({ error: `Failed to check links: ${error instanceof Error ? error.message : String(error)}` }),
+      { 
+        status: 500,
+        headers: { "content-type": "application/json" }
+      }
+    );
   }
+}
+
+// Extract links from HTML without using cheerio
+function extractLinks(html: string, baseUrl: string): string[] {
+  const links: string[] = [];
+  const hrefRegex = /href=["'](.*?)["']/gi;
+  let match;
+
+  while ((match = hrefRegex.exec(html)) !== null) {
+    try {
+      const href = match[1];
+      
+      // Skip anchor links and javascript URLs
+      if (href && !href.startsWith("#") && !href.startsWith("javascript:")) {
+        // Resolve relative URLs
+        const resolvedUrl = new URL(href, baseUrl).toString();
+        links.push(resolvedUrl);
+      }
+    } catch (e) {
+      console.error(`Error resolving URL:`, e);
+    }
+  }
+
+  return links;
 }
 
 async function checkLinksInBatches(links: string[], batchSize: number) {
