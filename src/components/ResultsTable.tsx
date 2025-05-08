@@ -8,12 +8,13 @@ import { ArrowDown, ArrowUp, Check, X } from "lucide-react";
 
 interface ResultsTableProps {
   results: LinkCheckResult[];
+  isRecursive?: boolean;
 }
 
 type SortField = "url" | "status";
 type SortOrder = "asc" | "desc";
 
-const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
+const ResultsTable: React.FC<ResultsTableProps> = ({ results, isRecursive = false }) => {
   const [sortField, setSortField] = useState<SortField>("status");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
 
@@ -73,7 +74,7 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="w-[60%]">
+            <TableHead className={isRecursive ? "w-[45%]" : "w-[60%]"}>
               <Button 
                 variant="ghost" 
                 onClick={() => handleSort("url")}
@@ -82,6 +83,11 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
                 Link URL {getSortIcon("url")}
               </Button>
             </TableHead>
+            {isRecursive && (
+              <TableHead className="w-[25%]">
+                Source Page
+              </TableHead>
+            )}
             <TableHead>
               <Button 
                 variant="ghost" 
@@ -107,6 +113,15 @@ const ResultsTable: React.FC<ResultsTableProps> = ({ results }) => {
                   {result.url}
                 </a>
               </TableCell>
+              {isRecursive && (
+                <TableCell className="overflow-hidden text-ellipsis">
+                  {result.sourcePage ? (
+                    <span className="text-gray-600">{result.sourcePage}</span>
+                  ) : (
+                    <span className="text-gray-400">Root page</span>
+                  )}
+                </TableCell>
+              )}
               <TableCell>{renderStatusBadge(result)}</TableCell>
               <TableCell>
                 {result.isWorking ? (

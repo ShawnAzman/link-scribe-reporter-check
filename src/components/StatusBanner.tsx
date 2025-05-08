@@ -7,9 +7,16 @@ import { Check, AlertCircle } from "lucide-react";
 interface StatusBannerProps {
   results: LinkCheckResult[];
   url: string;
+  checkedPages?: number;
+  isRecursive?: boolean;
 }
 
-const StatusBanner: React.FC<StatusBannerProps> = ({ results, url }) => {
+const StatusBanner: React.FC<StatusBannerProps> = ({ 
+  results, 
+  url, 
+  checkedPages = 1,
+  isRecursive = false
+}) => {
   if (results.length === 0) {
     return (
       <Card className="p-4 bg-blue-50 border-blue-200 text-blue-700 max-w-3xl mx-auto">
@@ -49,8 +56,8 @@ const StatusBanner: React.FC<StatusBannerProps> = ({ results, url }) => {
           </p>
           <p className="text-sm">
             {allWorking 
-              ? `All ${totalCount} links on this page are working properly.` 
-              : `${brokenCount} out of ${totalCount} links on this page need attention.`}
+              ? `All ${totalCount} links ${isRecursive ? `across ${checkedPages} page${checkedPages > 1 ? 's' : ''}` : 'on this page'} are working properly.` 
+              : `${brokenCount} out of ${totalCount} links ${isRecursive ? `across ${checkedPages} page${checkedPages > 1 ? 's' : ''}` : 'on this page'} need attention.`}
           </p>
         </div>
       </div>
