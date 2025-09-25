@@ -28,7 +28,7 @@ const Index = () => {
       setUrl(submittedUrl);
       setResults([]);
       
-      // Start the link checking process
+      // Start the link checking process - this will scan the webpage for all links and validate each one
       const data = await checkLinks(submittedUrl);
       setResults(data);
       setHasChecked(true);
